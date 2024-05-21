@@ -2,7 +2,6 @@
 #include <string.h>
 #include <ctype.h>
 
-#define POINTER_DEBUG 1
 #include "vm.h"
 
 #define ARRSIZE(arr) (sizeof(arr)/sizeof(*arr))
@@ -13,6 +12,7 @@ typedef struct patch patch;
 
 enum token_type {
     TokenEq,   // eq <Cptr>, <Aptr>, <Bptr>
+    TokenAdd,  // add <Cptr>, <Aptr>, <Bptr>
     TokenMov,  // mov <value>, <addr>
     TokenNull, // null <addr> => mov 0, <addr>
     TokenPush, // push <addr>
@@ -21,8 +21,10 @@ enum token_type {
     TokenPopB, // popb <addr>
     TokenJmp,  // jmp <addr>
     TokenIf,   // if <addr>
+    TokenCall, // call <addr>
     TokenHalt, // halt
     TokenSys,  // sys
+    TokenRet,  // ret
     TokenNumber,
     TokenComma,
     TokenSymbol, // $<id>
@@ -64,20 +66,24 @@ vm_t gen_bytecode(token* tokens) {
     u16 i = 0;
 
     while(tokens[i].type != TokenEOF) {
-        switch(tokens[i++].type) {
-            case TokenSymbol:
-                patches_push(PATCH_DECL, vm.ip, tokens[i-1].symbol);
-            break;
-            case TokenHalt:
+        token token = tokens[i++];
+        switch(token.type) {
+            case TokenSymbol: {
+                printf("vm.ip = 0x%04X\n", vm.ip);
+                patches_push(PATCH_DECL, vm.ip, token.symbol);
+            } break;
+            case TokenHalt: {
                 vm.data[vm.ip++] = OpHalt;
-            break;
-            case TokenSys:
+            } break;
+            case TokenSys: {
                 vm.data[vm.ip++] = OpSyscall;
-            break;
+            } break;
             case TokenEq:{
                 // eq <Cptr>, <Aptr>, <Bptr>
                 u16 c = tokens[i++].data;
+                tokens[i++]; // Skip the comma
                 u16 a = tokens[i++].data;
+                tokens[i++]; // Skip the comma
                 u16 b = tokens[i++].data;
 
                 vm.data[vm.ip++] = OpEq;
@@ -90,21 +96,53 @@ vm_t gen_bytecode(token* tokens) {
                 // Bptr
                 *(u16*)(vm.data+vm.ip) = b;
                 vm.ip += 2;
-            }break;
-            case TokenMov:{
-                // mov <value>, <to>
-                u16 value = tokens[i++].data;
-                u16 to = tokens[i++].data;
+            } break;
+            case TokenAdd:{
+                // add <Cptr>, <Aptr>, <Bptr>
+                u16 c = tokens[i++].data;
+                tokens[i++]; // Skip the comma
+                u16 a = tokens[i++].data;
+                tokens[i++]; // Skip the comma
+                u16 b = tokens[i++].data;
 
-                vm.data[vm.ip++] = OpMove;
-                // value
-                *(u16*)(vm.data+vm.ip) = value;
+                vm.data[vm.ip++] = OpAdd;
+                // Cptr
+                *(u16*)(vm.data+vm.ip) = c;
                 vm.ip += 2;
+                // Aptr
+                *(u16*)(vm.data+vm.ip) = a;
+                vm.ip += 2;
+                // Bptr
+                *(u16*)(vm.data+vm.ip) = b;
+                vm.ip += 2;
+            } break;
+            case TokenMov: {
+                // mov <value>, <to>
+                
+                vm.data[vm.ip++] = OpMove;
+                
+                // value
+                switch(tokens[i].type) {
+                    case TokenNumber: {
+                        u16 value = tokens[i++].data;
+                        *(u16*)(vm.data+vm.ip) = value;
+                    }break;
+                    case TokenSymbol:
+                        patches_push(PATCH_REF, vm.ip, tokens[i++].symbol);
+                    break;
+                    default: todo("Figure out what to error here!"); break;
+                }
+                vm.ip += 2;
+
+                tokens[i++]; // Skip the comma
+
                 // to
+                u16 to = tokens[i++].data;
                 *(u16*)(vm.data+vm.ip) = to;
                 vm.ip += 2;
-            }break;
-            case TokenNull:{
+            } break;
+
+            case TokenNull: {
                 u16 addr = tokens[i++].data;
 
                 vm.data[vm.ip++] = OpMove;
@@ -114,24 +152,24 @@ vm_t gen_bytecode(token* tokens) {
                 // to
                 *(u16*)(vm.data+vm.ip) = addr;
                 vm.ip += 2;
-            }break;
-            case TokenPush:{
+            } break;
+            case TokenPush: {
                 u16 addr = tokens[i++].data;
 
                 vm.data[vm.ip++] = OpPush;
                 
                 *(u16*)(vm.data+vm.ip) = addr;
                 vm.ip += 2;
-            }break;
-            case TokenPushB:{
+            } break;
+            case TokenPushB: {
                 u16 addr = tokens[i++].data;
 
                 vm.data[vm.ip++] = OpPushB;
                 
                 *(u16*)(vm.data+vm.ip) = addr;
                 vm.ip += 2;
-            }break;
-            case TokenPop:{
+            } break;
+            case TokenPop: {
                 u16 addr = tokens[i++].data;
 
                 vm.data[vm.ip++] = OpPop;
@@ -152,14 +190,14 @@ vm_t gen_bytecode(token* tokens) {
 
                 switch(tokens[i].type) {
                     case TokenNumber:
-                        vm.data[vm.ip++] = tokens[i].data;
+                        *(u16*)(vm.data+vm.ip) = tokens[i].data;
                     break;
                     case TokenSymbol:
                         patches_push(PATCH_REF, vm.ip, tokens[i].symbol);
-                        ++vm.ip;
                     break;
-                    default: todo("Figure out a better error message!");
+                    default: todo("Figure out a better error message!"); break;
                 }
+                vm.ip += 2;
                 ++i;
             }break;
             case TokenIf:{
@@ -170,6 +208,31 @@ vm_t gen_bytecode(token* tokens) {
                 *(u16*)(vm.data+vm.ip) = addr;
                 vm.ip += 2;
             }break;
+
+            case TokenCall:
+                vm.data[vm.ip++] = OpCall;
+
+                switch(tokens[i].type) {
+                    case TokenNumber:
+                        *(u16*)(vm.data+vm.ip) = tokens[i++].data;
+                    break;
+                    case TokenSymbol:
+                        patches_push(PATCH_REF, vm.ip, tokens[i++].symbol);
+                    break;
+                    default: todo("Figure out a better error message!"); break;
+                }
+                vm.ip += 2;
+            break;
+
+            case TokenRet:
+                vm.data[vm.ip++] = OpReturn;
+            break;
+
+            default:
+                printf("token_type = 0x%02X\n", tokens[i-1].type);
+                printf("i = %zu\n", i-1);
+                todo("Implement not implemented token!");
+            break;
         }
     }
 
@@ -181,7 +244,11 @@ vm_t gen_bytecode(token* tokens) {
                 continue;
             if(strcmp(patches[i].id, patches[j].id))
                 continue;
-            vm.data[patches[i].addr] = patches[j].addr;
+            
+            printf("patches[i].addr = 0x%04X\n", patches[i].addr);
+            printf("patches[j].addr = 0x%04X\n", patches[j].addr);
+            *(u16*)(vm.data+patches[i].addr) = patches[j].addr;
+            printf("*(u16*)(vm.data+0x%04X) = 0x%04X\n", patches[i].addr, *(u16*)(vm.data+patches[i].addr));
         }
     }
 
@@ -211,8 +278,7 @@ char* read_file(const char* path) {
 
 void print_tokens(token* tokens, u16 tokens_size) {
     for(u16 i = 0; i < tokens_size; ++i) {
-        printf("tokens[i].type = 0x%02X\n", tokens[i].type);
-        printf("tokens[i].data = %u\n", tokens[i].data);
+        printf("tokens[%d] = {\n\t.type = 0x%02X,\n\t.data = %u\n}\n", i, tokens[i].type, tokens[i].data);
     }
 }
 
@@ -230,8 +296,6 @@ int main(int argc, char** argv) {
     char* file_content = read_file(input_file);
     size_t file_size = strlen(file_content);
 
-    printf("file_size = %zu\n", file_size);
-
     char lexeme[256] = {0};
     unsigned char li = 0;
 
@@ -244,8 +308,9 @@ int main(int argc, char** argv) {
                 continue;
             }
 
+            printf("c = %c\n", c);
             switch(c) {
-                case '#':
+                case ';':
                     while(i < file_size &&
                         (c = file_content[i++]) != '\n');
                 break;
@@ -259,7 +324,7 @@ int main(int argc, char** argv) {
                         .type = TokenNumber,
                         .data = ASCII
                     };
-                    ++i;
+                    // ++i;
                 } break;
                 case ',':
                     tokens[tokens_size++] = (token) {
@@ -286,12 +351,12 @@ int main(int argc, char** argv) {
                         };
                         break;
                     }
-                case '$':{
+                case '#':{
                     ++i;
                     li = 0;
                     memset(lexeme, 0, ARRSIZE(lexeme));
                     while(i < file_size &&
-                        isalpha((c = file_content[i++]))) {
+                        isalpha((c = file_content[i++])) || c == '_') {
                         lexeme[li++] = c;
                     }
                     lexeme[li] = 0;
@@ -317,6 +382,8 @@ int main(int argc, char** argv) {
                             type = TokenMov;
                         else if(!strcmp(lexeme, "eq"))
                             type = TokenEq;
+                        else if(!strcmp(lexeme, "add"))
+                            type = TokenAdd;
                         else if(!strcmp(lexeme, "null"))
                             type = TokenNull;
                         else if(!strcmp(lexeme, "hlt"))
@@ -333,6 +400,10 @@ int main(int argc, char** argv) {
                             type = TokenJmp;
                         else if(!strcmp(lexeme, "if"))
                             type = TokenIf;
+                        else if(!strcmp(lexeme, "ret"))
+                            type = TokenRet;
+                        else if(!strcmp(lexeme, "call"))
+                            type = TokenCall;
                         else if(!strcmp(lexeme, "sys"))
                             type = TokenSys;
                         else {
@@ -364,17 +435,22 @@ int main(int argc, char** argv) {
             .type = TokenEOF
         };
     }
-
+    
     printf("tokens generated!\n");
     
-    //print_tokens(tokens, tokens_size);
+    print_tokens(tokens, tokens_size);
 
     vm_t vm = gen_bytecode(tokens);
 
+    for(u8 i = 0; i < 10; ++i)
+        printf("| 0x%02X | ", vm.data[i]);
+    putchar('\n');
+
     printf("bytecode generated!\n");
 
-    FILE* fp = fopen(output_file, "w+");
-    fwrite(&vm, sizeof(vm), 1, fp);
+    FILE* fp = fopen(output_file, "wb");
+    // store only the ROM onto the file
+    fwrite(vm.data, sizeof(*vm.data), sizeof(vm.data)/sizeof(*vm.data), fp);
 
     fclose(fp);
 

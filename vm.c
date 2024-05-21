@@ -3,6 +3,15 @@
 #define PEEK_RAM(vm, index) *(u16*)(vm->memory + (index))
 #define PEEK_ROM(vm, index) *(u16*)(vm->data + (index))
 
+#ifdef POINTER_DEBUG
+void vm_dump_memory(vm_t* vm, u16 max_memory_index) {
+    for(u16 i = 0; i < max_memory_index; ++i) {
+        printf("| 0x%02X | ", *(u8*)(vm->memory+i));
+    }
+    putchar('\n');
+}
+#endif
+
 u8 vm_popU8_stack(vm_t* vm) {
     --vm->sp;
     return vm->stack[vm->sp];
@@ -24,8 +33,9 @@ void vm_pushU16_stack(vm_t* vm, u16 num) {
 
 
 u16 vm_read_u16(vm_t* vm){
+    u16 value = PEEK_ROM(vm, vm->ip);
     vm->ip += 2;
-    return PEEK_ROM(vm, vm->ip-2);
+    return value;
 }
 
 void vm_skip_instruction(vm_t* vm){
@@ -106,14 +116,33 @@ void vm_skip_instruction(vm_t* vm){
             vm->ip += 2;
         } break;
 
+        // popb <addr>
+        case OpPopB: {
+            vm->ip += 2;
+        } break;
+
+        // ret
+        case OpReturn: {} break;
+        
+        // call <addr>
+        case OpCall: {
+            vm->ip += 2;
+        } break;
+
         // sys        
         case OpSyscall: {} break;
+
+        default: todo("Implement!"); break;
     }
 }
 
 void execute_vm(vm_t* vm) {
     do {
         u8 op = vm->data[vm->ip++];
+
+        // printf("op = 0x%02X\n", op);
+        // printf("ip = 0x%04X\n", vm->ip);
+        
         switch(op) {
             case OpHalt: {
                 vm->halted = true;
@@ -182,14 +211,27 @@ void execute_vm(vm_t* vm) {
             } break;
             
             // jmp <addr>
-            case OpJmp:
-                vm->ip = vm_read_u16(vm);
-            break;
+            case OpJmp: {
+                u16 addr = vm_read_u16(vm);
+                vm->ip = addr;
+            } break;
 
             // jmp_in <addr>
             case OpJmpIn:
                 vm->ip = PEEK_RAM(vm, vm_read_u16(vm));
             break;
+
+            // ret
+            case OpReturn:
+                vm->ip = vm->call_stack[--vm->cp];
+            break;
+
+            // call <addr>
+            case OpCall: {
+                u16 addr = vm_read_u16(vm);
+                vm->call_stack[vm->cp++] = vm->ip;
+                vm->ip = addr;
+            } break;
             
             // push <addr>
             case OpPush: {

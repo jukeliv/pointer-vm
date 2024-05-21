@@ -5,10 +5,16 @@
 #ifndef VM_H_
 #define VM_H_
 
+#define POINTER_DEBUG
+
 #define u8  unsigned char
 #define u16 unsigned short
 
-#define todo(msg) printf("todo at line %u in file: %s: %s\n", __LINE__, __FILE__, msg); exit(1)
+#define todo(msg) \
+    do { \
+        printf("todo at line %u in file: %s: %s\n", __LINE__, __FILE__, msg); \
+        exit(1); \
+    } while(0)
 
 typedef struct vm_t vm_t;
 
@@ -20,6 +26,8 @@ struct vm_t{
     u8 memory[0xFFFF];
     u8 stack[0xFFFF];
     ExternalFunc external[0xFF];
+    u16 call_stack[0xFF];
+    u16 cp;         // relative address pointer for the call stack
     u16 sp;         // relative address pointer for the stack
     u16 ip;         // relative address pointer for the instructions
     bool halted;
@@ -42,15 +50,12 @@ enum operations {
     OpSyscall,
     OpPushB,
     OpPopB,
+    OpReturn,
+    OpCall,
 };
 
-#if POINTER_DEBUG
-void vm_dump_memory(vm_t* vm, u16 max_memory_index) {
-    for(u16 i = 0; i < max_memory_index; ++i) {
-        printf("| 0x%02X | ", *(u8*)(vm->memory+i));
-    }
-    putchar('\n');
-}
+#ifdef POINTER_DEBUG
+void vm_dump_memory(vm_t* vm, u16 max_memory_index);
 #endif
 
 u8 vm_popU8_stack(vm_t* vm);

@@ -1,16 +1,7 @@
 #include <stdio.h>
 
-#define POINTER_DEBUG 0
+#define ARR_SIZE(arr) (sizeof(arr)/sizeof(*arr))
 #include "vm.h"
-
-void addition(vm_t* vm) {
-    vm_pushU16_stack(vm, vm_popU16_stack(vm)+vm_popU16_stack(vm));
-}
-
-void print_u16(vm_t* vm) {
-    u16 v = vm_popU16_stack(vm);
-    printf("%d\n", v);
-}
 
 int main(int argc, char** argv) {
     if(argc < 2) {
@@ -21,12 +12,9 @@ int main(int argc, char** argv) {
 
     vm_t vm = {0};
 
-    fread(&vm, sizeof(vm), 1, fp) != sizeof(vm);
+    fread(vm.data, sizeof(*vm.data), ARR_SIZE(vm.data), fp) != sizeof(vm.data);
 
     fclose(fp);
-
-    vm.external[0] = addition;
-    vm.external[1] = print_u16;
 
     execute_vm(&vm);
 
