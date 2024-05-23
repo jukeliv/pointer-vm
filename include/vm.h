@@ -22,41 +22,61 @@ typedef void(* ExternalFunc)(vm_t*);
 
 // 16 bit machine
 struct vm_t{
+    /*
+        ROM layout:
+        0x00 to 0x400 -> the stack
+
+    */
     u8 data[0xFFFF];
     u8 memory[0xFFFF];
-    u8 stack[0xFFFF];
     ExternalFunc external[0xFF];
-    u16 call_stack[0xFF];
-    u16 cp;         // relative address pointer for the call stack
-    u16 sp;         // relative address pointer for the stack
+    u16 r[3];       // general registers ( r0, r1, r2 )
+    u16 sp;         // stack pointer
+    u16 bp;         // base pointer
     u16 ip;         // relative address pointer for the instructions
     bool halted;
 };
 
 enum operations {
-    OpHalt,
-    OpMove,
-    OpAdd,
-    OpSub,
-    OpLt,
-    OpGt,
-    OpEq,
+    OpHlt,
+    
+    OpMoveCA, // move constant to address
+    OpMoveCR, // move constant to register
+    OpMoveAR, // move address to address
+    OpMoveRR, // move register to register
+
+    OpAddAC,  // r0 = *addr  + const
+    OpAddAA,  // r0 = *addr1 + *addr2
+    OpAddRC,  // r0 =  reg   + const
+
+    OpEqAA,   // r0 = *addr1 == *addr2
+
     OpPeek,
     OpIf,
     OpJmp,
     OpJmpIn,
-    OpPush,
-    OpPop,
+    
+    OpPushReg,
+    OpPushAddr,
+    
+    OpPopReg,
+    OpPopAddr,
+    
+    OpPushAddrB,
+    OpPopAddrB,
+
     OpSyscall,
-    OpPushB,
-    OpPopB,
+    
     OpReturn,
     OpCall,
+    OpLeave,
 };
 
 #ifdef POINTER_DEBUG
 void vm_dump_memory(vm_t* vm, u16 max_memory_index);
 #endif
+
+u16* vm_get_register(vm_t* vm, u8 index);
 
 u8 vm_popU8_stack(vm_t* vm);
 void vm_pushU8_stack(vm_t* vm, u8 num);

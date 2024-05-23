@@ -25,9 +25,12 @@ enum token_type {
     TokenHalt, // halt
     TokenSys,  // sys
     TokenRet,  // ret
+    TokenLeave, // leave
     TokenNumber,
     TokenComma,
+    TokenAddress,
     TokenSymbol, // $<id>
+    TokenRegister, // rsi, rbp, r0, r1, r2
     TokenEOF,
 };
 
@@ -66,18 +69,22 @@ vm_t gen_bytecode(token* tokens) {
     u16 i = 0;
 
     while(tokens[i].type != TokenEOF) {
-        token token = tokens[i++];
-        switch(token.type) {
+        token tok = tokens[i++];
+        switch(tok.type) {
             case TokenSymbol: {
-                printf("vm.ip = 0x%04X\n", vm.ip);
-                patches_push(PATCH_DECL, vm.ip, token.symbol);
+                patches_push(PATCH_DECL, vm.ip, tok.symbol);
             } break;
+            case TokenLeave:
+                vm.data[vm.ip++] = OpLeave;
+            break;
             case TokenHalt: {
-                vm.data[vm.ip++] = OpHalt;
+                vm.data[vm.ip++] = OpHlt;
             } break;
             case TokenSys: {
                 vm.data[vm.ip++] = OpSyscall;
             } break;
+            
+            /*
             case TokenEq:{
                 // eq <Cptr>, <Aptr>, <Bptr>
                 u16 c = tokens[i++].data;
@@ -97,55 +104,90 @@ vm_t gen_bytecode(token* tokens) {
                 *(u16*)(vm.data+vm.ip) = b;
                 vm.ip += 2;
             } break;
+            */
             case TokenAdd:{
-                // add <Cptr>, <Aptr>, <Bptr>
-                u16 c = tokens[i++].data;
-                tokens[i++]; // Skip the comma
-                u16 a = tokens[i++].data;
-                tokens[i++]; // Skip the comma
-                u16 b = tokens[i++].data;
+                printf("add(i = %zu)\n", i);
 
-                vm.data[vm.ip++] = OpAdd;
-                // Cptr
-                *(u16*)(vm.data+vm.ip) = c;
-                vm.ip += 2;
-                // Aptr
-                *(u16*)(vm.data+vm.ip) = a;
-                vm.ip += 2;
-                // Bptr
-                *(u16*)(vm.data+vm.ip) = b;
-                vm.ip += 2;
+
+                token value = tokens[i++];
+                tokens[i++]; // Skip the comma
+                token to = tokens[i++];
+
+                if(value.type == TokenAddress && to.type == TokenAddress){
+                    vm.data[vm.ip++] = OpAddAA;
+                    *(u16*)(vm.data+vm.ip) = value.data;
+                    vm.ip += 2;
+                    *(u16*)(vm.data+vm.ip) = to.data;
+                    vm.ip += 2;
+                } if(value.type == TokenAddress && to.type == TokenNumber){
+                    vm.data[vm.ip++] = OpAddAC;
+                    *(u16*)(vm.data+vm.ip) = value.data;
+                    vm.ip += 2;
+                    *(u16*)(vm.data+vm.ip) = to.data;
+                    vm.ip += 2;
+                } else if(value.type == TokenRegister && to.type == TokenNumber){
+                    vm.data[vm.ip++] = OpAddRC;
+                    *(u16*)(vm.data+vm.ip) = value.data;
+                    vm.ip += 2;
+                    vm.data[vm.ip++] = to.data;
+                } else {
+                    printf("value.type = 0x%02X\n", value.type);
+                    printf("to.type = 0x%02X\n", to.type);
+                    todo("Figure out a better error message!\n");
+                }
+
+                printf("i = %zu\n", i);
             } break;
             case TokenMov: {
                 // mov <value>, <to>
-                
-                vm.data[vm.ip++] = OpMove;
-                
-                // value
-                switch(tokens[i].type) {
-                    case TokenNumber: {
-                        u16 value = tokens[i++].data;
-                        *(u16*)(vm.data+vm.ip) = value;
-                    }break;
-                    case TokenSymbol:
-                        patches_push(PATCH_REF, vm.ip, tokens[i++].symbol);
-                    break;
-                    default: todo("Figure out what to error here!"); break;
-                }
-                vm.ip += 2;
+                printf("mov(i = %zu)\n", i);
 
+                token value = tokens[i++];
                 tokens[i++]; // Skip the comma
+                token to = tokens[i++];
 
-                // to
-                u16 to = tokens[i++].data;
-                *(u16*)(vm.data+vm.ip) = to;
-                vm.ip += 2;
+                if(value.type == TokenNumber && to.type == TokenAddress){
+                    vm.data[vm.ip++] = OpMoveCA;
+                    *(u16*)(vm.data+vm.ip) = value.data;
+                    vm.ip += 2;
+                    *(u16*)(vm.data+vm.ip) = to.data;
+                    vm.ip += 2;
+                } else if(value.type == TokenSymbol && to.type == TokenAddress){
+                    vm.data[vm.ip++] = OpMoveCA;
+                    patches_push(PATCH_REF, vm.ip, value.symbol);
+                    vm.ip += 2;
+                    *(u16*)(vm.data+vm.ip) = to.data;
+                    vm.ip += 2;
+                } else if(value.type == TokenNumber && to.type == TokenRegister){
+                    vm.data[vm.ip++] = OpMoveCR;
+                    *(u16*)(vm.data+vm.ip) = value.data;
+                    vm.ip += 2;
+                    vm.data[vm.ip++] = to.data;
+                } else if(value.type == TokenRegister && to.type == TokenRegister) {
+                    vm.data[vm.ip++] = OpMoveRR;
+                    vm.data[vm.ip++] = value.data;
+                    vm.data[vm.ip++] = to.data;
+                } else if(value.type == TokenAddress && to.type == TokenRegister) {
+                    vm.data[vm.ip++] = OpMoveAR;
+                    *(u16*)(vm.data+vm.ip) = value.data;
+                    vm.ip += 2;
+                    vm.data[vm.ip++] = to.data;
+                } else {
+                    printf("value.type = 0x%02X\n", value.type);
+                    printf("to.type = 0x%02X\n", to.type);
+                    todo("Figure out a better error message!\n");
+                }
+
+                printf("i = %zu\n", i);
             } break;
-
+            // null is not working currently!
+            // TODO: maybe add an extra step between tokens and bytecode
+            // so all this syntax sugar can be converted to that
+            // before we generate the bytecode
             case TokenNull: {
                 u16 addr = tokens[i++].data;
 
-                vm.data[vm.ip++] = OpMove;
+                vm.data[vm.ip++] = OpMoveCA;
                 // value
                 *(u16*)(vm.data+vm.ip) = 0;
                 vm.ip += 2;
@@ -154,33 +196,51 @@ vm_t gen_bytecode(token* tokens) {
                 vm.ip += 2;
             } break;
             case TokenPush: {
-                u16 addr = tokens[i++].data;
-
-                vm.data[vm.ip++] = OpPush;
+                token t = tokens[i++];
                 
-                *(u16*)(vm.data+vm.ip) = addr;
-                vm.ip += 2;
+                switch(t.type) {
+                    case TokenRegister:
+                        vm.data[vm.ip++] = OpPushReg;
+                        vm.data[vm.ip++] = (u8)t.data;
+                    break;
+                    case TokenAddress:
+                        vm.data[vm.ip++] = OpPushAddr;
+                        *(u16*)(vm.data+vm.ip) = t.data;
+                        vm.ip += 2;
+                    break;
+                    default: todo("Figure out a better error message!"); break;
+                }
             } break;
             case TokenPushB: {
                 u16 addr = tokens[i++].data;
 
-                vm.data[vm.ip++] = OpPushB;
+                vm.data[vm.ip++] = OpPushAddrB;
                 
                 *(u16*)(vm.data+vm.ip) = addr;
                 vm.ip += 2;
             } break;
             case TokenPop: {
-                u16 addr = tokens[i++].data;
+                token t = tokens[i++];
 
-                vm.data[vm.ip++] = OpPop;
+                switch(t.type) {
+                    case TokenRegister:
+                        vm.data[vm.ip++] = OpPopReg;
                 
-                *(u16*)(vm.data+vm.ip) = addr;
-                vm.ip += 2;
+                        vm.data[vm.ip++] = (u8)t.data;
+                    break;
+                    case TokenAddress:
+                        vm.data[vm.ip++] = OpPopAddr;
+                
+                        *(u16*)(vm.data+vm.ip) = t.data;
+                        vm.ip += 2;
+                    break;
+                    default: todo("Figure out a better error message!"); break;
+                }
             }break;
             case TokenPopB:{
                 u16 addr = tokens[i++].data;
 
-                vm.data[vm.ip++] = OpPopB;
+                vm.data[vm.ip++] = OpPopAddrB;
                 
                 *(u16*)(vm.data+vm.ip) = addr;
                 vm.ip += 2;
@@ -300,15 +360,15 @@ int main(int argc, char** argv) {
     unsigned char li = 0;
 
     {
+        bool isPointer = false;
         size_t i = 0;
         while(i < file_size) {
             char c = file_content[i];
+            // printf("c = %c\n", c);
             if(iswspace(c)) {
                 ++i;
                 continue;
             }
-
-            printf("c = %c\n", c);
             switch(c) {
                 case ';':
                     while(i < file_size &&
@@ -327,31 +387,17 @@ int main(int argc, char** argv) {
                     // ++i;
                 } break;
                 case ',':
+                    printf(",\n");
                     tokens[tokens_size++] = (token) {
                         .type = TokenComma,
                     };
                     ++i;
                 break;
-                case '0':
-                    if(file_content[i+1] == 'x') {
-                        li = 0;
-                        memset(lexeme, 0, ARRSIZE(lexeme));
-                        i += 2;
-                        lexeme[li++] = '0';
-                        lexeme[li++] = 'x';
-                        while(i < file_size &&
-                            isxdigit((c = file_content[i++]))) {
-                            lexeme[li++] = c;
-                        }
-                        lexeme[li] = 0;
-
-                        tokens[tokens_size++] = (token) {
-                            .type = TokenNumber,
-                            .data = (u16)strtol(lexeme, NULL, 16)
-                        };
-                        break;
-                    }
-                case '#':{
+                case '*':
+                    isPointer = true;
+                    ++i;
+                break;
+                case '%':{
                     ++i;
                     li = 0;
                     memset(lexeme, 0, ARRSIZE(lexeme));
@@ -366,17 +412,43 @@ int main(int argc, char** argv) {
                         .symbol = strdup(lexeme)
                     };
                 }break;
+                case '0': {
+                    if(file_content[i+1] == 'x') {
+                        li = 0;
+                        memset(lexeme, 0, ARRSIZE(lexeme));
+                        lexeme[li++] = file_content[i++];
+                        lexeme[li++] = file_content[i++];
+                        while(i < file_size &&
+                            isxdigit((c = file_content[i++]))) {
+                            lexeme[li++] = c;
+                        }
+                        lexeme[li] = 0;
+
+                        u8 type = TokenNumber;
+                        if(isPointer) {
+                            isPointer = false;
+                            type = TokenAddress;
+                        }
+
+                        tokens[tokens_size++] = (token) {
+                            .type = type,
+                            .data = (u16)strtol(lexeme, NULL, 16)
+                        };
+                        continue;
+                    }
+                }
                 default:
                     li = 0;
                     memset(lexeme, 0, ARRSIZE(lexeme));
                     if(isalpha(c)) {
                         while(i < file_size &&
-                            isalpha((c = file_content[i++]))) {
+                            isalpha((c = file_content[i++])) || isdigit(c)) {
                             lexeme[li++] = c;
                         }
                         lexeme[li] = 0;
 
                         u8 type = 0;
+                        u16 data = 0;
 
                         if(!strcmp(lexeme, "mov"))
                             type = TokenMov;
@@ -406,13 +478,36 @@ int main(int argc, char** argv) {
                             type = TokenCall;
                         else if(!strcmp(lexeme, "sys"))
                             type = TokenSys;
+                        else if(!strcmp(lexeme, "leave"))
+                            type = TokenLeave;
+                        else if(!strcmp(lexeme, "r0")) {
+                            type = TokenRegister;
+                            data = 0x00;
+                        }
+                        else if(!strcmp(lexeme, "r1")) {
+                            type = TokenRegister;
+                            data = 0x01;
+                        }
+                        else if(!strcmp(lexeme, "r2")) {
+                            type = TokenRegister;
+                            data = 0x02;
+                        }
+                        else if(!strcmp(lexeme, "rsp")) {
+                            type = TokenRegister;
+                            data = 0x03;
+                        }
+                        else if(!strcmp(lexeme, "rbp")) {
+                            type = TokenRegister;
+                            data = 0x04;
+                        }
                         else {
                             printf("Unknown lexeme found! ( %s )\n", lexeme);
                             exit(1);
                         }
                         
                         tokens[tokens_size++] = (token) {
-                            .type = type
+                            .type = type,
+                            .data = data
                         };
                     } else if(isdigit(c)) {
                         while(i < file_size &&
@@ -421,8 +516,17 @@ int main(int argc, char** argv) {
                         }
                         lexeme[li] = 0;
 
+                        printf("number(c = %c)\n", c);
+
+                        u8 type = TokenNumber;
+                        if(isPointer) {
+                            isPointer = false;
+                            printf("RECOMENDATION: When you index an address, using hex instead of decimal is better!\n");
+                            type = TokenAddress;
+                        }
+
                         tokens[tokens_size++] = (token) {
-                            .type = TokenNumber,
+                            .type = type,
                             .data = (u16)atoi(lexeme)
                         };
                     } else {

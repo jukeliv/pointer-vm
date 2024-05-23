@@ -12,25 +12,52 @@ void vm_dump_memory(vm_t* vm, u16 max_memory_index) {
 }
 #endif
 
+u16* vm_get_register(vm_t* vm, u8 index) {
+    switch(index) {
+        // r0 to r2
+        case 0x00:
+            return &vm->r[index];
+        break;
+        case 0x01:
+            return &vm->r[index];
+        break;
+        case 0x02:
+            return &vm->r[index];
+        break;
+        // rsp
+        case 0x03:
+            return &vm->sp;
+        break;
+        // rbp
+        case 0x04:
+            return &vm->bp;
+        break;
+
+        default:
+            printf("index = 0x%02X\n", index);
+            todo("Add more registers!");
+        break;
+    }
+}
+
 u8 vm_popU8_stack(vm_t* vm) {
     --vm->sp;
-    return vm->stack[vm->sp];
+    return vm->memory[vm->sp];
 }
 
 void vm_pushU8_stack(vm_t* vm, u8 num) {
-    vm->stack[vm->sp++] = num;
+    vm->memory[vm->sp++] = num;
 }
 
 u16 vm_popU16_stack(vm_t* vm) {
     vm->sp -= 2;
-    return *(u16*)(vm->stack+vm->sp);
+    return *(u16*)(vm->memory+vm->sp);
 }
 
 void vm_pushU16_stack(vm_t* vm, u16 num) {
-    *(u16*)(vm->stack+vm->sp) = num;
+    *(u16*)(vm->memory+vm->sp) = num;
     vm->sp += 2;
 }
-
 
 u16 vm_read_u16(vm_t* vm){
     u16 value = PEEK_ROM(vm, vm->ip);
@@ -42,45 +69,49 @@ void vm_skip_instruction(vm_t* vm){
     u8 op = vm->data[vm->ip++];
 
     switch(op) {
-        case OpHalt: {} break;
+        case OpHlt: {} break;
 
         // mov <constant>, <ptr>
-        case OpMove: {
+        case OpMoveCA: {
+            vm->ip += 2;
+            vm->ip += 2;
+        } break;
+        // mov <ptr>, <register>
+        case OpMoveAR: {
+            vm->ip += 2;
+            vm->ip += 2;
+        } break;
+        // mov <constant>, <register>
+        case OpMoveCR: {
+            vm->ip += 2;
+            vm->ip += 2;
+        } break;
+        // mov <register>, <register>
+        case OpMoveRR: {
             vm->ip += 2;
             vm->ip += 2;
         } break;
             
-        // add <Cptr>, <Aptr>, <Bptr>
-        case OpAdd: {
-            vm->ip += 2;
-            vm->ip += 2;
-            vm->ip += 2;
-        } break;
-            
-        // sub <ptr>, <ptr>
-        case OpSub: {
-            vm->ip += 2;
+        // add <Aptr>, <Bptr>
+        case OpAddAA: {
             vm->ip += 2;
             vm->ip += 2;
         } break;
-    
-        // lt <Cptr>, <Aptr>, <Bptr>
-        case OpLt:{
-            vm->ip += 2;
-            vm->ip += 2;
-            vm->ip += 2;
-        } break;
-    
-        // gt <Cptr>, <Aptr>, <Bptr>
-        case OpGt:{
-            vm->ip += 2;
+        
+        // add <ptr>, <const>
+        case OpAddAC: {
             vm->ip += 2;
             vm->ip += 2;
         } break;
-    
-        // eq <Cptr>, <Aptr>, <Bptr>
-        case OpEq:{
+        
+        // add <register>, <const>
+        case OpAddRC: {
             vm->ip += 2;
+            vm->ip += 2;
+        } break;
+        
+        // add <Aptr>, <Bptr>
+        case OpEqAA: {
             vm->ip += 2;
             vm->ip += 2;
         } break;
@@ -107,27 +138,47 @@ void vm_skip_instruction(vm_t* vm){
         } break;
         
         // push <addr>
-        case OpPush: {
+        case OpPushAddr: {
             vm->ip += 2;
         } break;
-        
+
+        // push <register>
+        case OpPushReg: {
+            ++vm->ip;
+        } break;
+
         // pop <addr>
-        case OpPop: {
+        case OpPopAddr: {
+            vm->ip += 2;
+        } break;
+
+        // pop <register>
+        case OpPopReg: {
+            ++vm->ip;
+        } break;
+
+        
+        // pushb <addr>
+        case OpPushAddrB: {
             vm->ip += 2;
         } break;
 
         // popb <addr>
-        case OpPopB: {
-            vm->ip += 2;
+        case OpPopAddrB: {
+            ++vm->ip;
         } break;
 
         // ret
         case OpReturn: {} break;
         
+        // leave
+        case OpLeave: {} break;
+        
         // call <addr>
         case OpCall: {
             vm->ip += 2;
         } break;
+
 
         // sys        
         case OpSyscall: {} break;
@@ -144,57 +195,67 @@ void execute_vm(vm_t* vm) {
         // printf("ip = 0x%04X\n", vm->ip);
         
         switch(op) {
-            case OpHalt: {
+            case OpHlt: {
                 vm->halted = true;
             } break;
 
             // mov <constant>, <ptr>
-            case OpMove: {
+            case OpMoveCA: {
                 u16 value   = vm_read_u16(vm);
                 u16 ptr     = vm_read_u16(vm);
 
+                printf("ptr = 0x%04X\n", ptr);
+                printf("value = 0x%02X\n", value);
+
                 PEEK_RAM(vm, ptr) = value;
+
+                printf("PEEK_RAM(vm, ptr) = 0x%02X\n", PEEK_RAM(vm, ptr));
             } break;
+            // mov <constant>, <register>
+            case OpMoveCR: {
+                u16 value   = vm_read_u16(vm);
+                u16* reg     = vm_get_register(vm, vm->data[vm->ip++]);
+
+                *reg = value;
+            } break;
+            // mov <ptr>, <register>
+            case OpMoveAR: {
+                u16 ptr   = vm_read_u16(vm);
+                u16* reg     = vm_get_register(vm, vm->data[vm->ip++]);
+
+                *reg = PEEK_RAM(vm, ptr);
+            } break;
+            // mov <register>, <register>
+            case OpMoveRR: {
+                u16* regB     = vm_get_register(vm, vm->data[vm->ip++]);
+                u16* regA     = vm_get_register(vm, vm->data[vm->ip++]);
+
+                *regA = *regB;
+            } break;
+
+            case OpAddAC: {
+                u16 ptr     = vm_read_u16(vm);
+                vm->r[0] = PEEK_RAM(vm, ptr) + vm_read_u16(vm);
+            } break;  // r0 = *addr  + const
             
-            // add <Cptr>, <Aptr>, <Bptr>
-            case OpAdd: {
-                u16 c   = vm_read_u16(vm);
-                u16 a   = vm_read_u16(vm);
-                u16 b   = vm_read_u16(vm);
-                PEEK_RAM(vm, c) = PEEK_RAM(vm, a) + PEEK_RAM(vm, b);
-            } break;
+            case OpAddAA: {
+                u16 ptrA     = vm_read_u16(vm);
+                u16 ptrB     = vm_read_u16(vm);
+
+                vm->r[0] = PEEK_RAM(vm, ptrA) + PEEK_RAM(vm, ptrB); 
+            } break;  // r0 = *addr1 + *addr2
             
-            // sub <Cptr>, <Aptr>, <Bptr>
-            case OpSub: {
-                u16 c   = vm_read_u16(vm);
-                u16 a   = vm_read_u16(vm);
-                u16 b   = vm_read_u16(vm);
-                PEEK_RAM(vm, c) = PEEK_RAM(vm, a) - PEEK_RAM(vm, b);
-            } break;
+            case OpAddRC: {
+                u16* reg     = vm_get_register(vm, vm->data[vm->ip++]);
+                vm->r[0] = *reg + vm_read_u16(vm);
+            } break;  // r0 =  reg   + const
 
-            // lt <Cptr>, <Aptr>, <Bptr>
-            case OpLt: {
-                u16 c   = vm_read_u16(vm);
-                u16 a   = vm_read_u16(vm);
-                u16 b   = vm_read_u16(vm);
-                PEEK_RAM(vm, c) = PEEK_RAM(vm, a) < PEEK_RAM(vm, b);
-            } break;
+            case OpEqAA: {
+                u16 ptrA     = vm_read_u16(vm);
+                u16 ptrB     = vm_read_u16(vm);
 
-            // gt <Cptr>, <Aptr>, <Bptr>
-            case OpGt: {
-                u16 c   = vm_read_u16(vm);
-                u16 a   = vm_read_u16(vm);
-                u16 b   = vm_read_u16(vm);
-                PEEK_RAM(vm, c) = PEEK_RAM(vm, a) > PEEK_RAM(vm, b);
-            } break;
-
-            // eq <Cptr>, <Aptr>, <Bptr>
-            case OpEq: {
-                u16 c   = vm_read_u16(vm);
-                u16 a   = vm_read_u16(vm);
-                u16 b   = vm_read_u16(vm);
-                PEEK_RAM(vm, c) = (PEEK_RAM(vm, a) == PEEK_RAM(vm, b));
-            } break;
+                vm->r[0] = PEEK_RAM(vm, ptrA) == PEEK_RAM(vm, ptrB); 
+            } break;   // r0 = *addr1 == *addr2
             
             // peek <ptr2>, <ptr1>
             case OpPeek: {
@@ -223,47 +284,67 @@ void execute_vm(vm_t* vm) {
 
             // ret
             case OpReturn:
-                vm->ip = vm->call_stack[--vm->cp];
+                vm->ip = vm->memory[vm->sp--];
+            break;
+
+            // leave
+            case OpLeave:
+                vm->sp = vm->bp;
+                vm->bp = vm->memory[vm->sp--];
             break;
 
             // call <addr>
             case OpCall: {
                 u16 addr = vm_read_u16(vm);
-                vm->call_stack[vm->cp++] = vm->ip;
+                vm->memory[vm->sp++] = vm->ip;
                 vm->ip = addr;
             } break;
             
             // push <addr>
-            case OpPush: {
+            case OpPushAddr: {
                 u16 addr = vm_read_u16(vm);
                 vm_pushU16_stack(vm, PEEK_RAM(vm, addr));
             } break;
 
+            // push <register>
+            case OpPushReg: {
+                u16* reg = vm_get_register(vm, vm->data[vm->ip++]);
+                vm_pushU16_stack(vm, *reg);
+            } break;
+
             // pop <addr>
-            case OpPop: {
+            case OpPopAddr: {
                 u16 addr = vm_read_u16(vm);
                 PEEK_RAM(vm, addr) = vm_popU16_stack(vm);
             } break;
             
+            // push <register>
+            case OpPopReg: {
+                u16* reg = vm_get_register(vm, vm->data[vm->ip++]);
+                *reg = vm_popU16_stack(vm);
+            } break;
+            
             // pushb <addr>
-            case OpPushB: {
+            case OpPushAddrB: {
                 u16 addr = vm_read_u16(vm);
                 vm_pushU8_stack(vm, PEEK_RAM(vm, addr));
             } break;
 
             // popb <addr>
-            case OpPopB: {
+            case OpPopAddrB: {
                 u16 addr = vm_read_u16(vm);
                 PEEK_RAM(vm, addr) = vm_popU8_stack(vm);
             } break;
 
             // sys
             case OpSyscall: {
-                u16 sn = *(u16*)vm->memory;
+                u16 sn = PEEK_RAM(vm, 0);
+                printf("sn = %d\n", sn);
                 switch(sn) {
                     // syscall 0x00 -> print character to stdout
                     case 0x00: {
                         char c = vm_popU8_stack(vm);
+                        printf("c = %c\n", c);
                         putchar(c);
                     } break;
                     // syscall 0x01 -> read character from stdin, and push onto the stack
